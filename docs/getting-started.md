@@ -1,0 +1,101 @@
+# Getting started
+
+Ninety seconds from install to your first passing test.
+
+## 1. Install
+
+```bash
+npm install -g promptforge
+```
+
+Requires Node 20 or later.
+
+> **ESM-only.** `promptforge.config.ts` and `*.test.ts` files are loaded
+> through Node's ESM resolver. If your project's `package.json` doesn't
+> declare `"type": "module"`, add it (or stick to `*.test.yaml`). CommonJS
+> projects will hit `Cannot require() ES Module ... in a cycle` when the
+> TypeScript loader runs.
+
+## 2. Scaffold
+
+```bash
+cd your-llm-project
+promptforge init
+```
+
+The interactive scaffolder asks four questions: test directory, which
+providers to enable by default, whether to create an example test, and
+whether to add `.promptforge/` to `.gitignore`.
+
+It writes:
+
+- `promptforge.config.ts` — project defaults.
+- `prompts/hello.md` and `prompts/hello.test.yaml` — a mock-provider
+  test that passes out of the box with zero API keys configured.
+- Updates `.gitignore` if needed.
+
+## 3. Run
+
+```bash
+promptforge run
+```
+
+You should see:
+
+```
+🧪 PromptForge v0.1.0
+
+→ prompts/hello.test.yaml
+  ✓ greets by name (mock) 0ms
+
+Tests     1 passed, 1 total
+Providers mock
+Duration  0.05s
+Run       abc-123
+```
+
+Zero API keys, zero failures. You have a working test harness.
+
+## 4. Add a real provider
+
+Edit `promptforge.config.ts`:
+
+```typescript
+import { defineConfig } from 'promptforge';
+
+export default defineConfig({
+  providers: {
+    defaultModels: [
+      'anthropic/claude-haiku-4-5',
+      'mock',
+    ],
+  },
+});
+```
+
+Set the key:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Remove the `mockOutput` line from `prompts/hello.test.yaml` so the real
+model gets called. (The scaffolded suite intentionally has no `providers:`
+block, so it inherits `defaultModels` from the config above.) Run again.
+Observe real latency, real cost.
+
+## 5. Explore history
+
+```bash
+promptforge ui
+```
+
+Opens the dashboard at `http://127.0.0.1:3939`. Your run appears in the
+runs list. Click in for the full detail view. Run a second time — the
+compare view now has two runs to diff.
+
+## Next
+
+- [Test Files](test-files.md) — YAML vs TypeScript, multi-provider syntax.
+- [Assertions Reference](assertions.md) — every assertion type, in depth.
+- [CI Integration](ci.md) — JUnit reporter, GitHub Actions snippet.

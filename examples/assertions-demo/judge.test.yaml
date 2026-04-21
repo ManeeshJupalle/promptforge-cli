@@ -1,0 +1,29 @@
+# llmJudge needs a real LLM to grade. Primary output is mock (deterministic)
+# so the test is reproducible; only the judge call is live.
+# Requires: `ollama pull llama3.2:1b` — tinyllama is too small to follow
+# JSON-output instructions reliably.
+prompt: ./demo.md
+providers:
+  - mock
+
+tests:
+  - name: judge accepts a greeting at a forgiving threshold
+    vars:
+      name: Zoe
+    mockOutput: "Hello Zoe! Welcome — so glad to meet you."
+    assert:
+      - type: llmJudge
+        criteria: "Response mentions the name Zoe and sounds like a warm greeting"
+        judgeModel: ollama/llama3.2:1b
+        threshold: 2
+
+  # Intentionally-failing: judge should reject an off-topic output at a strict threshold.
+  - name: judge rejects a non-greeting at a strict threshold
+    vars:
+      name: Zoe
+    mockOutput: "The capital of France is Paris."
+    assert:
+      - type: llmJudge
+        criteria: "Response mentions the name Zoe and sounds like a warm greeting"
+        judgeModel: ollama/llama3.2:1b
+        threshold: 5

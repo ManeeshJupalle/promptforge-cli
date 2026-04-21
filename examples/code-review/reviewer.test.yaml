@@ -1,0 +1,61 @@
+# Code-review assistant: semantic similarity to a reference review + budget
+# guardrails. Semantic similarity lets the assertion tolerate wording
+# variation while still catching drift in *what* the review emphasizes.
+prompt: ./reviewer.md
+providers:
+  - mock
+
+tests:
+  - name: flags SQL injection vulnerability
+    vars:
+      diff: |
+        - const query = `SELECT * FROM users WHERE email = '${email}'`;
+        + const query = `SELECT * FROM users WHERE email = '${email}'`;
+    mockOutput: |
+      The email interpolation on the new line is a SQL injection vector.
+      Parameterize this query — use `db.prepare('SELECT * FROM users WHERE email = ?')`
+      and bind the email value. Also consider input validation at the boundary.
+    assert:
+      - type: semanticSimilarity
+        expected: "This code is vulnerable to SQL injection — use parameterized queries."
+        threshold: 0.4
+      - type: contains
+        value: parameterize
+        caseSensitive: false
+      - type: cost
+        max: 0.005
+
+  - name: flags missing error handling
+    vars:
+      diff: |
+        + const data = await fetch(url).then(r => r.json());
+    mockOutput: |
+      The `fetch().then(r => r.json())` chain has no error handling. If the
+      request fails or the response isn't JSON, this throws uncaught. Wrap
+      in try/catch and check `r.ok` before calling `.json()`.
+    assert:
+      - type: semanticSimilarity
+        expected: "You should handle errors when the fetch fails or the response isn't JSON."
+        threshold: 0.6
+      - type: contains
+        value: error
+        caseSensitive: false
+      - type: latency
+        maxMs: 4000
+
+  - name: approves clean refactor
+    vars:
+      diff: |
+        - function add(a, b) { return a + b; }
+        + const add = (a: number, b: number): number => a + b;
+    mockOutput: |
+      Clean refactor. The arrow form with explicit types is a readability
+      win and the TypeScript annotations prevent accidental string coercion.
+      No issues.
+    assert:
+      - type: notContains
+        value: vulnerability
+        caseSensitive: false
+      - type: semanticSimilarity
+        expected: "This is a clean refactor. The TypeScript types are a readability win. No issues."
+        threshold: 0.5

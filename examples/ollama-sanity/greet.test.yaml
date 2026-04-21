@@ -1,0 +1,29 @@
+# End-to-end Ollama test. Requires a local Ollama daemon with the `tinyllama`
+# model pulled: `ollama pull tinyllama`. To run against paid providers too,
+# uncomment the lines below and export ANTHROPIC_API_KEY / OPENAI_API_KEY.
+prompt: ./greet.md
+providers:
+  - ollama/tinyllama
+  # - anthropic/claude-haiku-4-5
+  # - openai/gpt-4o-mini
+
+tests:
+  - name: greets Alice
+    vars:
+      name: Alice
+    assert:
+      - type: regex
+        pattern: "alice"
+        flags: i
+      - type: notContains
+        value: "error"
+
+  - name: greets Bob
+    vars:
+      name: Bob
+    assert:
+      - type: regex
+        pattern: "bob"
+        flags: i
+      - type: notContains
+        value: "error"

@@ -1,0 +1,39 @@
+prompt: ./hello.md
+providers:
+  - mock
+
+tests:
+  - name: greets the user by name
+    vars:
+      name: Alice
+    mockOutput: "Hello, Alice! Welcome aboard."
+    assert:
+      - type: contains
+        value: Hello
+      - type: contains
+        value: Alice
+      - type: notContains
+        value: error
+      - type: regex
+        pattern: "^Hello, \\w+"
+
+  - name: responds in JSON
+    vars:
+      message: ping
+    mockOutput: '{"status":"ok","echo":"ping"}'
+    assert:
+      - type: regex
+        pattern: "^\\{.*\\}$"
+        flags: s
+      - type: contains
+        value: ping
+
+  - name: demonstrates a failing assertion
+    vars:
+      name: Bob
+    mockOutput: "Sorry, an error occurred."
+    assert:
+      - type: contains
+        value: Hello
+      - type: notContains
+        value: error

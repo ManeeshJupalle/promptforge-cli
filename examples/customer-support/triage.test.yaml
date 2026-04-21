@@ -1,0 +1,62 @@
+# Customer-support triage: classification + structured output + empathy grading.
+# Mock outputs keep this demo deterministic and free. Swap providers to
+# anthropic/claude-sonnet-4-6 or openai/gpt-4o-mini to run against a real LLM.
+prompt: ./triage.md
+providers:
+  - mock
+
+tests:
+  - name: classifies billing complaint
+    vars:
+      message: "I was charged twice for my subscription this month — please refund."
+    mockOutput: |
+      {"category":"billing","urgency":"high","suggested_reply":"I'm sorry about the duplicate charge — I'll escalate this for an immediate refund review."}
+    assert:
+      - type: jsonSchema
+        schema:
+          type: object
+          required: [category, urgency, suggested_reply]
+          properties:
+            category: { enum: [billing, technical, account, other] }
+            urgency: { enum: [low, medium, high] }
+            suggested_reply: { type: string, minLength: 10 }
+          additionalProperties: false
+      - type: contains
+        value: billing
+      - type: cost
+        max: 0.01
+      - type: latency
+        maxMs: 5000
+
+  - name: detects outage urgency
+    vars:
+      message: "Production is down, our customers can't log in, every minute costs us money."
+    mockOutput: |
+      {"category":"technical","urgency":"high","suggested_reply":"This sounds critical — I'm paging the on-call engineer now."}
+    assert:
+      - type: jsonSchema
+        schema:
+          type: object
+          required: [category, urgency]
+          properties:
+            urgency: { const: high }
+      - type: contains
+        value: technical
+
+  - name: handles vague message gracefully
+    vars:
+      message: "help"
+    mockOutput: |
+      {"category":"other","urgency":"low","suggested_reply":"Happy to help — could you share a bit more about what you need?"}
+    assert:
+      - type: jsonSchema
+        schema:
+          type: object
+          required: [category, urgency, suggested_reply]
+      # Pull the reply text via regex before asserting on its meaning —
+      # semanticSimilarity on a full JSON blob is dominated by the brace
+      # characters and reads as "unrelated" to a plain-English reference.
+      - type: regex
+        pattern: '"suggested_reply"\s*:\s*"[^"]*(more|detail|share|tell)[^"]*"'
+      - type: notContains
+        value: error

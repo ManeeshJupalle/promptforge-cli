@@ -1,0 +1,54 @@
+# Resume-parser: strict schema + snapshot drift detection.
+# Extraction prompts are the canonical place for `snapshot` — the exact
+# output shape should not drift run-to-run. If it does, either the prompt
+# changed or the model updated silently.
+prompt: ./parser.md
+providers:
+  - mock
+
+tests:
+  - name: extracts senior engineer resume
+    vars:
+      resume: |
+        Jane Doe — jane@example.com
+        Senior Software Engineer at Acme Corp (2019-present)
+        Previously: Software Engineer at Initech (2015-2019)
+        Skills: TypeScript, Go, Postgres, Kubernetes, gRPC
+    mockOutput: |
+      {"name":"Jane Doe","email":"jane@example.com","years_of_experience":10,"skills":["TypeScript","Go","Postgres","Kubernetes","gRPC"],"most_recent_title":"Senior Software Engineer"}
+    assert:
+      - type: jsonSchema
+        schema:
+          type: object
+          required: [name, email, years_of_experience, skills, most_recent_title]
+          properties:
+            name: { type: string, minLength: 1 }
+            email: { type: [string, "null"] }
+            years_of_experience: { type: number, minimum: 0, maximum: 60 }
+            skills: { type: array, items: { type: string } }
+            most_recent_title: { type: [string, "null"] }
+          additionalProperties: false
+      - type: regex
+        pattern: '"email"\s*:\s*"[^"]+@[^"]+"'
+      - type: snapshot
+        similarity: 0.92
+
+  - name: handles missing email gracefully
+    vars:
+      resume: |
+        John Smith
+        3 years experience as a Frontend Developer.
+        Skills: React, CSS
+    mockOutput: |
+      {"name":"John Smith","email":null,"years_of_experience":3,"skills":["React","CSS"],"most_recent_title":"Frontend Developer"}
+    assert:
+      - type: jsonSchema
+        schema:
+          type: object
+          required: [name, email, years_of_experience, skills]
+          properties:
+            email: { type: [string, "null"] }
+      - type: regex
+        pattern: '"email"\s*:\s*null'
+      - type: snapshot
+        similarity: 0.92

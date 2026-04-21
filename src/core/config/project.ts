@@ -1,0 +1,55 @@
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { stat } from 'node:fs/promises';
+import { z } from 'zod';
+
+export const projectConfigSchema = z.object({
+  testDir: z.string().optional(),
+  providers: z
+    .object({
+      defaultModels: z.array(z.string()).optional(),
+    })
+    .optional(),
+  snapshotThreshold: z.number().min(0).max(1).optional(),
+  // Note: `concurrency` is intentionally absent. Serial execution is the only
+  // supported mode today; reintroduce this field when parallel execution lands.
+});
+
+export type ProjectConfig = z.infer<typeof projectConfigSchema>;
+
+export const PROJECT_CONFIG_FILENAME = 'promptforge.config.ts';
+
+// Uses the same tsx register path as the *.test.ts loader — both go through
+// a single tsx hook registration per process.
+let registerPromise: Promise<void> | null = null;
+async function ensureTsxRegistered(): Promise<void> {
+  if (!registerPromise) {
+    registerPromise = (async () => {
+      const api = await import('tsx/esm/api');
+      api.register();
+    })();
+  }
+  await registerPromise;
+}
+
+export async function loadProjectConfig(cwd: string): Promise<ProjectConfig | null> {
+  const configPath = path.join(cwd, PROJECT_CONFIG_FILENAME);
+  const exists = await stat(configPath).catch(() => null);
+  if (!exists?.isFile()) return null;
+
+  await ensureTsxRegistered();
+  const mod = (await import(pathToFileURL(configPath).href)) as { default?: unknown };
+  if (mod.default === undefined) {
+    throw new Error(
+      `${PROJECT_CONFIG_FILENAME}: expected a default export (use \`export default defineConfig({...})\`)`,
+    );
+  }
+  const result = projectConfigSchema.safeParse(mod.default);
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((issue) => `  • ${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .join('\n');
+    throw new Error(`Invalid ${PROJECT_CONFIG_FILENAME}:\n${issues}`);
+  }
+  return result.data;
+}

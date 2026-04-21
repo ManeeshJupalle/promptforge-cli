@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.promptforge/
+*.log
+.DS_Store
+.env
+.env.local
+*.tgz

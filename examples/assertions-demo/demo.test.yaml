@@ -1,0 +1,95 @@
+# Exercises every Day 3 assertion against the mock provider so the suite
+# is deterministic and free. The llmJudge assertion is covered in judge.test.yaml
+# because judging needs a real LLM.
+prompt: ./demo.md
+providers:
+  - mock
+
+tests:
+  - name: jsonSchema validates the shape
+    vars:
+      name: Alice
+    mockOutput: '{"greeting":"Hello, Alice!","length":13}'
+    assert:
+      - type: jsonSchema
+        schema:
+          type: object
+          required: [greeting, length]
+          properties:
+            greeting: { type: string }
+            length: { type: integer, minimum: 0 }
+          additionalProperties: false
+
+  - name: jsonSchema extracts from surrounding prose
+    vars:
+      name: Ada
+    mockOutput: |
+      Here you go:
+      {"greeting":"Hello, Ada!","length":11}
+      Let me know if you need more.
+    assert:
+      - type: jsonSchema
+        schema:
+          type: object
+          required: [greeting, length]
+
+  - name: semanticSimilarity catches paraphrase
+    vars:
+      name: Bob
+    mockOutput: "Hi there Bob, nice to meet you!"
+    assert:
+      - type: semanticSimilarity
+        expected: "Hello Bob, welcome!"
+        threshold: 0.5
+
+  # Intentionally-failing case so the demo shows what a drift looks like
+  # in the reporter.
+  - name: demonstrates a failing semanticSimilarity
+    vars:
+      name: Bob
+    mockOutput: "The capital of France is Paris."
+    assert:
+      - type: semanticSimilarity
+        expected: "Hello Bob, welcome!"
+        threshold: 0.5
+
+  - name: snapshot records and re-matches
+    vars:
+      name: Carol
+    mockOutput: "A fixed deterministic greeting for Carol."
+    assert:
+      - type: snapshot
+        similarity: 0.95
+
+  - name: cost assertion stays within budget
+    vars:
+      name: Dan
+    mockOutput: "Dan's greeting"
+    assert:
+      - type: cost
+        max: 0.01
+
+  - name: latency assertion stays within budget
+    vars:
+      name: Eve
+    mockOutput: "Eve's greeting"
+    assert:
+      - type: latency
+        maxMs: 5000
+
+  # Intentionally-failing: mock runs in 0ms, budget is -1ms
+  - name: demonstrates a failing latency budget
+    vars:
+      name: Faye
+    mockOutput: "Faye's greeting"
+    assert:
+      - type: latency
+        maxMs: -1
+
+  - name: custom assertion explains TS requirement
+    vars:
+      name: Grace
+    mockOutput: "Grace's greeting"
+    assert:
+      - type: custom
+        fn: "not supported in YAML"
