@@ -161,9 +161,16 @@ interface ConfigArgs {
 
 function renderConfigFile({ testDir, providers }: ConfigArgs): string {
   const providersLiteral = providers.map((p) => `    '${p}'`).join(',\n');
-  return `import { defineConfig } from 'promptforge';
-
-export default defineConfig({
+  // Intentionally no `import { defineConfig } from 'promptforge'` — that bare
+  // specifier only resolves when the user has promptforge in their local
+  // node_modules. A globally-installed CLI can't resolve it from the user's
+  // cwd, which would break the scaffolded flow. The config is validated with
+  // Zod at runtime, so the plain object is sufficient. Users who want IDE
+  // autocomplete can `npm install --save-dev promptforge` and add:
+  //   import type { ProjectConfig } from 'promptforge';
+  //   const config: ProjectConfig = { ... };
+  return `// Run \`npm install --save-dev promptforge\` for IDE autocomplete on this object.
+export default {
   testDir: '${testDir}',
   providers: {
     defaultModels: [
@@ -171,7 +178,7 @@ ${providersLiteral},
     ],
   },
   // snapshotThreshold: 0.9, // cosine similarity required for snapshot tests to pass
-});
+};
 `;
 }
 

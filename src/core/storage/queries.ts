@@ -188,31 +188,41 @@ export interface SnapshotMatch {
 // Case-insensitive substring match across file path, test name, and provider.
 // The dashboard / CLI uses `listMatchingSnapshots` to preview what a --clear
 // would remove before calling `deleteMatchingSnapshots`.
+//
+// User-supplied patterns are treated as literal substrings, so SQL LIKE
+// wildcards (`%`, `_`) and the escape char itself are escaped with `\`. The
+// SQL then uses `ESCAPE '\\'` so `snapshot --clear "_"` matches a literal
+// underscore instead of any single character.
 export function listMatchingSnapshots(db: Database, pattern: string): SnapshotMatch[] {
-  const like = `%${pattern.toLowerCase()}%`;
+  const like = `%${escapeLikePattern(pattern.toLowerCase())}%`;
   return db
     .prepare(
       `SELECT id, test_file, test_name, provider
        FROM snapshots
-       WHERE LOWER(test_file) LIKE ?
-          OR LOWER(test_name) LIKE ?
-          OR LOWER(provider) LIKE ?
+       WHERE LOWER(test_file) LIKE ? ESCAPE '\\'
+          OR LOWER(test_name) LIKE ? ESCAPE '\\'
+          OR LOWER(provider) LIKE ? ESCAPE '\\'
        ORDER BY test_file, test_name, provider`,
     )
     .all(like, like, like) as SnapshotMatch[];
 }
 
 export function deleteMatchingSnapshots(db: Database, pattern: string): number {
-  const like = `%${pattern.toLowerCase()}%`;
+  const like = `%${escapeLikePattern(pattern.toLowerCase())}%`;
   const result = db
     .prepare(
       `DELETE FROM snapshots
-       WHERE LOWER(test_file) LIKE ?
-          OR LOWER(test_name) LIKE ?
-          OR LOWER(provider) LIKE ?`,
+       WHERE LOWER(test_file) LIKE ? ESCAPE '\\'
+          OR LOWER(test_name) LIKE ? ESCAPE '\\'
+          OR LOWER(provider) LIKE ? ESCAPE '\\'`,
     )
     .run(like, like, like);
   return result.changes;
+}
+
+function escapeLikePattern(s: string): string {
+  // Backslash first so we don't double-escape what we just added.
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 // ---------- dashboard aggregations (Day 5) ----------

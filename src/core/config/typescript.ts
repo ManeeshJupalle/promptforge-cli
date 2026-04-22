@@ -16,10 +16,19 @@ async function ensureRegistered(): Promise<void> {
   await registerPromise;
 }
 
+// Monotonic counter — guarantees a unique `?t=` per call even when two
+// loads happen in the same millisecond (Date.now() can collide under fast
+// watch-mode edits). Wrapping at 2^53 is a theoretical concern only.
+let loadCounter = 0;
+
 export async function loadTsSuite(filePath: string): Promise<TestSuite> {
   await ensureRegistered();
 
-  const url = pathToFileURL(filePath).href;
+  // Append a fresh query string so Node's ESM loader treats each call as a
+  // distinct module — otherwise `watch` mode keeps returning the cached v1
+  // after the file is edited. The overhead for single-run commands is a
+  // negligible re-parse on the first and only load.
+  const url = `${pathToFileURL(filePath).href}?t=${++loadCounter}`;
   let mod: { default?: unknown };
   try {
     mod = (await import(url)) as { default?: unknown };

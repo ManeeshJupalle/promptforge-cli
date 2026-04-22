@@ -30,7 +30,7 @@ export async function assertLlmJudge(ctx: AssertionContext, raw: Assertion): Pro
       type: 'llmJudge',
       passed: false,
       message:
-        'llmJudge: no `judgeModel` specified and no provider in the suite could serve as judge',
+        'llmJudge: no `judgeModel` specified and no non-mock provider in the suite can serve as judge — set `judgeModel` on the assertion or add a real provider to the suite',
     };
   }
 
@@ -110,15 +110,23 @@ function extractJson(text: string): unknown {
 }
 
 function selectJudge(providers: string[]): string {
-  if (providers.length === 0) return '';
-  const ranked = [...providers].sort((a, b) => judgeRank(a) - judgeRank(b));
+  // Exclude mock entirely — it can't actually grade, so "sort it last" would
+  // still pick it as the judge in a mock-only suite and then fail at JSON
+  // parsing. Returning '' lets the caller surface a clear error message
+  // pointing the user at `judgeModel:` or adding a real provider.
+  const candidates = providers.filter(isJudgeCapable);
+  if (candidates.length === 0) return '';
+  const ranked = [...candidates].sort((a, b) => judgeRank(a) - judgeRank(b));
   return ranked[0];
 }
 
-// Lower rank = preferred. Mock ranks last (it can't actually grade). Unknown
-// pricing sits between ollama/* and paid providers to avoid surprise bills.
+function isJudgeCapable(name: string): boolean {
+  return name !== 'mock' && !name.startsWith('mock/');
+}
+
+// Lower rank = preferred. Unknown pricing sits between ollama/* and paid
+// providers so an un-priced model doesn't bill silently.
 function judgeRank(name: string): number {
-  if (name === 'mock' || name.startsWith('mock/')) return Number.MAX_VALUE;
   const entry = PRICING[name];
   if (!entry) return 1_000_000;
   return entry.input + entry.output;

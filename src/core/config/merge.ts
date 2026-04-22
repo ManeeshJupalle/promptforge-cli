@@ -10,7 +10,10 @@ export interface ResolvedDefaults {
 export const HARDCODED_DEFAULTS: ResolvedDefaults = {
   providers: ['mock'],
   snapshotThreshold: 0.9,
-  testDir: 'prompts',
+  // When no `promptforge.config.ts` exists, discovery defaults to the
+  // current directory (the documented contract: "No paths = discover from
+  // the cwd"). `init` writes a config that sets this to 'prompts'.
+  testDir: '.',
 };
 
 // Explicit three-tier merge: per-suite overrides project, project overrides

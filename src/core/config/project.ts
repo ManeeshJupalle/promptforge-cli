@@ -19,6 +19,9 @@ export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
 export const PROJECT_CONFIG_FILENAME = 'promptforge.config.ts';
 
+// Monotonic counter for cache-busting — see the matching note in typescript.ts.
+let configLoadCounter = 0;
+
 // Uses the same tsx register path as the *.test.ts loader — both go through
 // a single tsx hook registration per process.
 let registerPromise: Promise<void> | null = null;
@@ -38,7 +41,11 @@ export async function loadProjectConfig(cwd: string): Promise<ProjectConfig | nu
   if (!exists?.isFile()) return null;
 
   await ensureTsxRegistered();
-  const mod = (await import(pathToFileURL(configPath).href)) as { default?: unknown };
+  // Cache-bust via monotonic counter so watch-mode reloads pick up edits.
+  // Node's ESM loader keys the cache on the full URL, so each unique token
+  // triggers a fresh import. See the matching note in typescript.ts.
+  const url = `${pathToFileURL(configPath).href}?t=${++configLoadCounter}`;
+  const mod = (await import(url)) as { default?: unknown };
   if (mod.default === undefined) {
     throw new Error(
       `${PROJECT_CONFIG_FILENAME}: expected a default export (use \`export default defineConfig({...})\`)`,

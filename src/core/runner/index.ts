@@ -1,7 +1,9 @@
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { MergedTestSuite, TestCase } from '../config/schema.js';
 import { HARDCODED_DEFAULTS } from '../config/merge.js';
+import { PROJECT_CONFIG_FILENAME } from '../config/project.js';
 import type { AssertionResult, CompletionResult, TestResult } from '../types/index.js';
 import { runAssertions } from '../assertions/index.js';
 import type { AssertionContext } from '../assertions/index.js';
@@ -84,7 +86,7 @@ export async function runSuites(
   const db = record ? await getDb(projectRoot) : null;
   if (db) {
     const configHash = await computeConfigHash(
-      suites.map((s) => s.file),
+      collectHashInputs(suites, projectRoot),
       projectRoot,
     );
     const gitCommit = await detectGitCommit(projectRoot);
@@ -189,6 +191,27 @@ export async function runSuites(
   };
   events.onFinish?.(summary);
   return summary;
+}
+
+// Every file whose contents can change a run's outcome: suite files, their
+// referenced prompt files, and `promptforge.config.ts` if present. Missing
+// prompt files are *still* included in the list — `computeConfigHash` folds
+// them in as a deterministic sentinel so the hash changes when the file
+// reappears or changes content.
+function collectHashInputs(suites: PlannedSuite[], projectRoot: string): string[] {
+  const files = new Set<string>();
+  for (const { file, suite } of suites) {
+    files.add(file);
+    if (suite.prompt) {
+      const abs = path.isAbsolute(suite.prompt)
+        ? suite.prompt
+        : path.resolve(path.dirname(file), suite.prompt);
+      files.add(abs);
+    }
+  }
+  const configAbs = path.join(projectRoot, PROJECT_CONFIG_FILENAME);
+  if (existsSync(configAbs)) files.add(configAbs);
+  return Array.from(files);
 }
 
 async function loadPromptFile(promptPath: string, suiteFile: string): Promise<string> {

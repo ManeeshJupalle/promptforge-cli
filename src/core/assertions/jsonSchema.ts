@@ -71,13 +71,53 @@ function extractJson(text: string): unknown {
   } catch {
     // fall through — try to find an embedded JSON block
   }
-  const match = trimmed.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-  if (match) {
+  // Scan for the first *balanced* {...} or [...] block. A greedy regex
+  // would gobble everything from the first `{` to the last `}`, so an
+  // output like `prefix {"ok":true} separator {"ignored":false}` would
+  // fail parsing even though the first object is valid JSON.
+  const candidate = findFirstBalanced(trimmed);
+  if (candidate !== null) {
     try {
-      return JSON.parse(match[0]);
+      return JSON.parse(candidate);
     } catch {
       return undefined;
     }
   }
   return undefined;
+}
+
+// Returns the first balanced `{...}` or `[...]` substring, respecting JSON
+// string literals (quotes and backslash escapes) so braces inside strings
+// don't skew the depth counter. Returns null if no balanced block exists.
+function findFirstBalanced(s: string): string | null {
+  for (let i = 0; i < s.length; i++) {
+    const open = s[i];
+    if (open !== '{' && open !== '[') continue;
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let j = i; j < s.length; j++) {
+      const c = s[j];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (c === '\\') {
+        escape = true;
+        continue;
+      }
+      if (c === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (c === open) depth++;
+      else if (c === close) {
+        depth--;
+        if (depth === 0) return s.slice(i, j + 1);
+      }
+    }
+  }
+  return null;
 }

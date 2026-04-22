@@ -17,6 +17,11 @@ const isYamlTestFile = (p: string): boolean => /\.test\.ya?ml$/i.test(p);
 const isTsTestFile = (p: string): boolean => /\.test\.ts$/i.test(p);
 const isTestFile = (p: string): boolean => isYamlTestFile(p) || isTsTestFile(p);
 
+// glob-magic characters that indicate a scope should be expanded rather than
+// treated as a literal path. Keep in sync with node-glob's supported syntax.
+const GLOB_MAGIC = /[*?[\]{}]/;
+const hasGlobMagic = (s: string): boolean => GLOB_MAGIC.test(s);
+
 export interface DiscoverOptions {
   // Project-configured test directory. Used only when the caller supplies no
   // explicit scopes — explicit paths always win so users can point discovery
@@ -38,6 +43,22 @@ export async function discoverTests(
         : ['.'];
 
   for (const scope of roots) {
+    // Glob-looking scopes get expanded as patterns relative to cwd. Literal
+    // paths fall through to the existing stat() path so bare directory /
+    // file arguments keep working the way the docs describe.
+    if (hasGlobMagic(scope)) {
+      const matches = await glob(scope, {
+        cwd,
+        ignore: DEFAULT_IGNORE,
+        absolute: true,
+        nodir: true,
+      });
+      for (const m of matches) {
+        if (isTestFile(m)) found.add(m);
+      }
+      continue;
+    }
+
     const abs = path.resolve(cwd, scope);
     let info;
     try {

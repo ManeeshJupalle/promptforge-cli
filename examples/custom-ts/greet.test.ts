@@ -1,6 +1,12 @@
-// Exercises the Day-4 TS config loader. defineTestSuite is an identity
+// Exercises the TS test-suite loader. defineTestSuite is an identity
 // helper; the real power is that YAML-hostile things (closures, imports,
 // dynamic data) work here.
+//
+// Outside this repo, the `'promptforge'` import requires the package to
+// be installed locally (`npm install --save-dev promptforge`) — a global
+// CLI install alone can't resolve this specifier. If you only have the
+// global CLI, drop the import and `export default { ... }` as a plain
+// object instead.
 import { defineTestSuite } from 'promptforge';
 
 const namesToGreet = ['Alice', 'Bob', 'Carol'];

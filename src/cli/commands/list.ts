@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 import chalk from 'chalk';
 import { discoverTests, loadSuites, TestSuiteParseError } from '../../core/config/loader.js';
 import { loadProjectConfig } from '../../core/config/project.js';
@@ -38,15 +39,41 @@ export async function listCommand(paths: string[]): Promise<number> {
     return 1;
   }
 
+  let missingPrompts = 0;
   for (const { file, suite } of suites) {
     const rel = path.relative(cwd, file) || file;
     const merged = mergeSuite(suite, projectConfig);
     console.log(chalk.bold(rel));
+
+    if (merged.prompt) {
+      const abs = path.isAbsolute(merged.prompt)
+        ? merged.prompt
+        : path.resolve(path.dirname(file), merged.prompt);
+      const exists = await stat(abs)
+        .then((s) => s.isFile())
+        .catch(() => false);
+      if (exists) {
+        console.log(chalk.dim(`  prompt:    ${merged.prompt}`));
+      } else {
+        console.log(chalk.red(`  prompt:    ${merged.prompt}  ✗ missing (${abs})`));
+        missingPrompts++;
+      }
+    }
+
     console.log(chalk.dim(`  providers: ${merged.providers.join(', ')}`));
     for (const t of merged.tests) {
       console.log(`  ${chalk.dim('·')} ${t.name} ${chalk.dim(`[${t.assert.length} assertion${t.assert.length === 1 ? '' : 's'}]`)}`);
     }
     console.log();
+  }
+
+  if (missingPrompts > 0) {
+    console.log(
+      chalk.yellow(
+        `⚠ ${missingPrompts} suite${missingPrompts === 1 ? '' : 's'} reference a prompt file that doesn't exist — \`promptforge run\` will fail on those.`,
+      ),
+    );
+    return 1;
   }
 
   return 0;
