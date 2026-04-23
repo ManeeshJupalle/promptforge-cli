@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import type { MergedTestSuite, TestCase } from '../config/schema.js';
 import { HARDCODED_DEFAULTS } from '../config/merge.js';
 import { PROJECT_CONFIG_FILENAME } from '../config/project.js';
+import { collectRelativeImports } from '../config/imports.js';
 import type { AssertionResult, CompletionResult, TestResult } from '../types/index.js';
 import { runAssertions } from '../assertions/index.js';
 import type { AssertionContext } from '../assertions/index.js';
@@ -86,7 +87,7 @@ export async function runSuites(
   const db = record ? await getDb(projectRoot) : null;
   if (db) {
     const configHash = await computeConfigHash(
-      collectHashInputs(suites, projectRoot),
+      await collectHashInputs(suites, projectRoot),
       projectRoot,
     );
     const gitCommit = await detectGitCommit(projectRoot);
@@ -194,11 +195,20 @@ export async function runSuites(
 }
 
 // Every file whose contents can change a run's outcome: suite files, their
-// referenced prompt files, and `promptforge.config.ts` if present. Missing
-// prompt files are *still* included in the list — `computeConfigHash` folds
-// them in as a deterministic sentinel so the hash changes when the file
-// reappears or changes content.
-function collectHashInputs(suites: PlannedSuite[], projectRoot: string): string[] {
+// referenced prompt files, `promptforge.config.ts` if present, and the
+// transitive relative-import graph of every .test.ts (and the config, if it
+// exists). The import walk catches changes to TS helper modules that the
+// suites pull in — without it, edits to a `helper.ts` that supplies vars or
+// custom assertions would leave the hash unchanged even though the run
+// produced different output.
+//
+// Missing prompt files are *still* included in the list — `computeConfigHash`
+// folds them in as a deterministic sentinel so the hash changes when the
+// file reappears or changes content.
+async function collectHashInputs(
+  suites: PlannedSuite[],
+  projectRoot: string,
+): Promise<string[]> {
   const files = new Set<string>();
   for (const { file, suite } of suites) {
     files.add(file);
@@ -208,9 +218,15 @@ function collectHashInputs(suites: PlannedSuite[], projectRoot: string): string[
         : path.resolve(path.dirname(file), suite.prompt);
       files.add(abs);
     }
+    if (/\.test\.ts$/i.test(file)) {
+      for (const imp of await collectRelativeImports(file)) files.add(imp);
+    }
   }
   const configAbs = path.join(projectRoot, PROJECT_CONFIG_FILENAME);
-  if (existsSync(configAbs)) files.add(configAbs);
+  if (existsSync(configAbs)) {
+    files.add(configAbs);
+    for (const imp of await collectRelativeImports(configAbs)) files.add(imp);
+  }
   return Array.from(files);
 }
 

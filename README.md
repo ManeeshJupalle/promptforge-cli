@@ -169,9 +169,9 @@ A local, read-only web UI over `.promptforge/db.sqlite`. Runs list,
 expandable run detail, side-by-side compare, trend charts, test
 explorer with pass-history sparklines.
 
-![PromptForge dashboard — runs view](docs/images/dashboard-runs.png)
-
-![PromptForge dashboard — compare view](docs/images/dashboard-compare.png)
+<!-- Dashboard screenshots (runs view + compare view) go here once captured
+     per scripts/capture-screenshots.md. Keeping the markdown out until the
+     assets exist so GitHub and npm don't render broken-image placeholders. -->
 
 ## Documentation
 

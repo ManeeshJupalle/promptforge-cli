@@ -3,17 +3,24 @@ import { pathToFileURL } from 'node:url';
 import { stat } from 'node:fs/promises';
 import { z } from 'zod';
 
-export const projectConfigSchema = z.object({
-  testDir: z.string().optional(),
-  providers: z
-    .object({
-      defaultModels: z.array(z.string()).optional(),
-    })
-    .optional(),
-  snapshotThreshold: z.number().min(0).max(1).optional(),
-  // Note: `concurrency` is intentionally absent. Serial execution is the only
-  // supported mode today; reintroduce this field when parallel execution lands.
-});
+// `.strict()` rejects unknown keys — typos like `snapshotThresold` would
+// otherwise be silently dropped and the user would wonder why their
+// threshold isn't applying. Nested `providers` is strict for the same
+// reason. Keep this in sync with the docs' listed config fields.
+export const projectConfigSchema = z
+  .object({
+    testDir: z.string().optional(),
+    providers: z
+      .object({
+        defaultModels: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+    snapshotThreshold: z.number().min(0).max(1).optional(),
+    // Note: `concurrency` is intentionally absent. Serial execution is the only
+    // supported mode today; reintroduce this field when parallel execution lands.
+  })
+  .strict();
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 

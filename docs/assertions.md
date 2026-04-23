@@ -96,11 +96,16 @@ score 1–5 with a one-sentence reasoning. Fails if `score < threshold`.
 
 If `judgeModel` is omitted, PromptForge picks the cheapest non-`mock`
 provider listed in the suite (Ollama ranks above paid providers because
-it's free).
+it's free). Mock is never auto-selected — a mock-only suite with
+`llmJudge` and no explicit `judgeModel` fails with a clear error telling
+you to set `judgeModel` or add a real provider.
 
-The judge call counts toward the overall run's provider activity but
-does *not* inflate the test's primary cost metric. `details` on failure
-records `judgeCost` and `judgeLatencyMs` separately.
+The judge call is accounted for per-assertion, not per-run: the run's
+overall `providers` list and top-level `total_cost` only reflect the
+suite's primary provider completions. A failing `llmJudge` assertion
+records the judge's own cost and latency inside its `details` object
+(`judgeCost`, `judgeLatencyMs`) so you can see what the grader actually
+spent without inflating the test's primary metrics.
 
 `details` on failure: `{ judgeModel, score, reasoning, threshold, judgeCost, judgeLatencyMs }`.
 

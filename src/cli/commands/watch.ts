@@ -8,6 +8,7 @@ import {
 } from '../../core/config/loader.js';
 import { loadProjectConfig, PROJECT_CONFIG_FILENAME } from '../../core/config/project.js';
 import { mergeSuite, resolveDefaults } from '../../core/config/merge.js';
+import { collectRelativeImports } from '../../core/config/imports.js';
 import { runSuites, type PlannedSuite, type RunSummary } from '../../core/runner/index.js';
 import { CliReporter } from '../../core/reporter/cli.js';
 
@@ -108,10 +109,21 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
   lastMode = { kind: 'all' };
 
   // Track every file we care about: test files + referenced prompt files +
-  // promptforge.config.ts. Resolved to absolute paths so chokidar normalizes
-  // consistently across platforms.
-  const buildWatchList = (files: string[], ss: PlannedSuite[]): string[] => {
+  // promptforge.config.ts + the transitive TS import graph of each. Resolved
+  // to absolute paths so chokidar normalizes consistently across platforms.
+  //
+  // Why the import graph: users write helpers (`import { fixtures } from
+  // './helpers.js'`). chokidar only notifies us about files it's subscribed
+  // to, so without walking the graph we'd silently ignore edits to those
+  // helpers. We still can't *hot-swap* the helper's content in-process (Node
+  // ESM caches modules by URL), but at least we detect the edit and warn
+  // the user about the stale-content limitation.
+  const buildWatchList = async (
+    files: string[],
+    ss: PlannedSuite[],
+  ): Promise<{ all: string[]; helperSet: Set<string> }> => {
     const out = new Set<string>(files);
+    const helpers = new Set<string>();
     for (const { file, suite } of ss) {
       if (suite.prompt) {
         const abs = path.isAbsolute(suite.prompt)
@@ -119,12 +131,30 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
           : path.resolve(path.dirname(file), suite.prompt);
         out.add(abs);
       }
+      if (/\.test\.ts$/i.test(file)) {
+        for (const imp of await collectRelativeImports(file)) {
+          if (imp !== file) {
+            out.add(imp);
+            helpers.add(imp);
+          }
+        }
+      }
     }
-    out.add(path.join(cwd, PROJECT_CONFIG_FILENAME));
-    return Array.from(out);
+    const configAbs = path.join(cwd, PROJECT_CONFIG_FILENAME);
+    out.add(configAbs);
+    // Config imports go in the helper set too — same staleness limitation.
+    for (const imp of await collectRelativeImports(configAbs)) {
+      if (imp !== configAbs) {
+        out.add(imp);
+        helpers.add(imp);
+      }
+    }
+    return { all: Array.from(out), helperSet: helpers };
   };
 
-  let watchList = buildWatchList(initial.files, initial.suites);
+  let watchBundle = await buildWatchList(initial.files, initial.suites);
+  let watchList = watchBundle.all;
+  let helperFiles = watchBundle.helperSet;
   const watcher = chokidar.watch(watchList, {
     ignoreInitial: true,
     persistent: true,
@@ -146,10 +176,21 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
       const configPath = path.resolve(path.join(cwd, PROJECT_CONFIG_FILENAME));
       const configChanged = changes.has(configPath);
 
+      // Detect edits to transitive TS helper files *before* we reload. Node's
+      // ESM loader caches resolved-URL → module, so the cache-bust `?t=` we
+      // append to top-level suite/config imports doesn't propagate to the
+      // helpers they import. That means a fresh call to loadTsSuite()
+      // still sees the *old* helper content in this process. The honest
+      // behavior is to warn the user and run on stale content, then tell
+      // them how to get a fresh cache (restart the watcher).
+      const helperChanges = Array.from(changes).filter((p) => helperFiles.has(p));
+
       const next = await reload();
       if (!next) return;
       suites = next.suites;
-      watchList = buildWatchList(next.files, next.suites);
+      watchBundle = await buildWatchList(next.files, next.suites);
+      watchList = watchBundle.all;
+      helperFiles = watchBundle.helperSet;
       void watcher.add(watchList); // idempotent
 
       const affected = configChanged
@@ -160,6 +201,20 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
         ? 'Config changed — full re-run'
         : `Affected: ${affected.length} suite${affected.length === 1 ? '' : 's'}`;
       await runOnce(affected, label);
+
+      if (helperChanges.length > 0) {
+        console.log();
+        console.log(
+          chalk.yellow.bold('⚠ imported helper file(s) changed — this run used the cached previous content.'),
+        );
+        for (const h of helperChanges) {
+          console.log(chalk.yellow(`  · ${path.relative(cwd, h)}`));
+        }
+        console.log(
+          chalk.dim('  Quit with `q` and re-run `promptforge watch` to pick up the new content (Node caches ESM modules by URL; transitive imports can\'t be hot-swapped in-process).'),
+        );
+      }
+
       lastMode = configChanged ? { kind: 'all' } : { kind: 'affected', files: new Set(affected.map((a) => a.file)) };
     }, 200);
   };
@@ -245,6 +300,18 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
       } else if (lastMode.kind === 'affected') {
         const affectedSuites = suites.filter((s) => lastMode.kind === 'affected' && lastMode.files.has(s.file));
         await runOnce(affectedSuites, 'Re-run (affected)');
+      } else if (lastMode.kind === 'pattern') {
+        const needle = lastMode.pattern.toLowerCase();
+        const filtered = suites
+          .map((s) => ({
+            file: s.file,
+            suite: {
+              ...s.suite,
+              tests: s.suite.tests.filter((t) => t.name.toLowerCase().includes(needle)),
+            },
+          }))
+          .filter((s) => s.suite.tests.length > 0);
+        await runOnce(filtered, `Re-run (pattern: ${lastMode.pattern})`);
       }
       return;
     }
@@ -265,6 +332,11 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
         }))
         .filter((s) => s.suite.tests.length > 0);
       await runOnce(filtered, `Pattern: ${pattern}`);
+      // Record the filter so that `↵` can honor its documented "re-run
+      // whatever ran last" contract. Without this the next `↵` would fall
+      // back to the previous mode (all / affected / failed) and the pattern
+      // would be silently dropped.
+      lastMode = { kind: 'pattern', pattern };
       return;
     }
   });
@@ -276,7 +348,8 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
 type RunMode =
   | { kind: 'all' }
   | { kind: 'failed' }
-  | { kind: 'affected'; files: Set<string> };
+  | { kind: 'affected'; files: Set<string> }
+  | { kind: 'pattern'; pattern: string };
 
 function resolveAffectedSuites(changes: Set<string>, suites: PlannedSuite[]): PlannedSuite[] {
   const affected: PlannedSuite[] = [];

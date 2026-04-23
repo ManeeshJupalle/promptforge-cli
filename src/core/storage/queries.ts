@@ -322,6 +322,11 @@ export function listDailyLatencies(db: Database): LatencyPoint[] {
 // Filters supported by listRunsFiltered: provider substring, status (pass/fail/any),
 // date range (ISO dates, inclusive). Applied via parameterized query — no SQL
 // injection risk.
+//
+// Unfinished runs (finished_at IS NULL) are excluded by default so the
+// dashboard never shows a crashed or force-killed run as a green "0 failed"
+// row. Set `includeUnfinished: true` to surface them explicitly (useful for
+// debugging or for a future "stuck runs" view).
 export interface RunsFilter {
   limit?: number;
   offset?: number;
@@ -329,6 +334,7 @@ export interface RunsFilter {
   status?: 'pass' | 'fail' | 'any';
   since?: number;  // epoch ms
   until?: number;  // epoch ms
+  includeUnfinished?: boolean;
 }
 
 export function listRunsFiltered(db: Database, f: RunsFilter = {}): RunRow[] {
@@ -337,6 +343,9 @@ export function listRunsFiltered(db: Database, f: RunsFilter = {}): RunRow[] {
   const clauses: string[] = ['1 = 1'];
   const params: unknown[] = [];
 
+  if (!f.includeUnfinished) {
+    clauses.push(`finished_at IS NOT NULL`);
+  }
   if (f.provider) {
     // Match any run that has a result with a matching provider substring.
     clauses.push(
