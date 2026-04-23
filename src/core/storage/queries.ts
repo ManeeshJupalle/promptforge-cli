@@ -348,10 +348,13 @@ export function listRunsFiltered(db: Database, f: RunsFilter = {}): RunRow[] {
   }
   if (f.provider) {
     // Match any run that has a result with a matching provider substring.
+    // LIKE wildcards (`%`, `_`) are escaped so user input is treated as a
+    // literal substring — the dashboard filter is documented as a substring
+    // match, so `_` should match a literal underscore, not any single char.
     clauses.push(
-      `EXISTS (SELECT 1 FROM results r WHERE r.run_id = runs.id AND r.provider LIKE ?)`,
+      `EXISTS (SELECT 1 FROM results r WHERE r.run_id = runs.id AND r.provider LIKE ? ESCAPE '\\')`,
     );
-    params.push(`%${f.provider}%`);
+    params.push(`%${escapeLikePattern(f.provider)}%`);
   }
   if (f.status === 'pass') {
     clauses.push(`failed = 0`);

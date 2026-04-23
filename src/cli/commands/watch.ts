@@ -121,9 +121,26 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
   const buildWatchList = async (
     files: string[],
     ss: PlannedSuite[],
-  ): Promise<{ all: string[]; helperSet: Set<string> }> => {
+  ): Promise<{
+    all: string[];
+    helperSet: Set<string>;
+    // helper absolute path → set of suite file paths that transitively import it.
+    // Used by the onChange handler to figure out which suites need a re-run
+    // after a helper-only edit. Without this map, helper changes would land
+    // in `affected=[]` and the runner would print "(nothing to run)".
+    helperOwners: Map<string, Set<string>>;
+  }> => {
     const out = new Set<string>(files);
     const helpers = new Set<string>();
+    const helperOwners = new Map<string, Set<string>>();
+    const addOwner = (helper: string, owner: string) => {
+      let set = helperOwners.get(helper);
+      if (!set) {
+        set = new Set<string>();
+        helperOwners.set(helper, set);
+      }
+      set.add(owner);
+    };
     for (const { file, suite } of ss) {
       if (suite.prompt) {
         const abs = path.isAbsolute(suite.prompt)
@@ -136,6 +153,7 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
           if (imp !== file) {
             out.add(imp);
             helpers.add(imp);
+            addOwner(imp, file);
           }
         }
       }
@@ -147,14 +165,17 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
       if (imp !== configAbs) {
         out.add(imp);
         helpers.add(imp);
+        // Config helpers are owned by the config itself — a change there
+        // means a full re-run, handled separately via the configChanged path.
       }
     }
-    return { all: Array.from(out), helperSet: helpers };
+    return { all: Array.from(out), helperSet: helpers, helperOwners };
   };
 
   let watchBundle = await buildWatchList(initial.files, initial.suites);
   let watchList = watchBundle.all;
   let helperFiles = watchBundle.helperSet;
+  let helperOwners = watchBundle.helperOwners;
   const watcher = chokidar.watch(watchList, {
     ignoreInitial: true,
     persistent: true,
@@ -191,11 +212,12 @@ export async function watchCommand(paths: string[], options: WatchOptions): Prom
       watchBundle = await buildWatchList(next.files, next.suites);
       watchList = watchBundle.all;
       helperFiles = watchBundle.helperSet;
+      helperOwners = watchBundle.helperOwners;
       void watcher.add(watchList); // idempotent
 
       const affected = configChanged
         ? suites
-        : resolveAffectedSuites(changes, suites);
+        : resolveAffectedSuites(changes, suites, helperOwners);
 
       const label = configChanged
         ? 'Config changed — full re-run'
@@ -351,10 +373,26 @@ type RunMode =
   | { kind: 'affected'; files: Set<string> }
   | { kind: 'pattern'; pattern: string };
 
-function resolveAffectedSuites(changes: Set<string>, suites: PlannedSuite[]): PlannedSuite[] {
+function resolveAffectedSuites(
+  changes: Set<string>,
+  suites: PlannedSuite[],
+  helperOwners: Map<string, Set<string>>,
+): PlannedSuite[] {
+  // Expand the change set to include every suite that transitively owns a
+  // changed helper. Otherwise a `helper.ts` edit would never reach the
+  // direct-file or prompt-file matchers below, `affected` would be empty,
+  // and the watcher would print "(nothing to run)" — defeating the whole
+  // point of registering helpers with chokidar.
+  const owningSuites = new Set<string>();
+  for (const changed of changes) {
+    const owners = helperOwners.get(changed);
+    if (owners) for (const o of owners) owningSuites.add(o);
+  }
+
   const affected: PlannedSuite[] = [];
   for (const s of suites) {
-    if (changes.has(path.resolve(s.file))) {
+    const suiteAbs = path.resolve(s.file);
+    if (changes.has(suiteAbs) || owningSuites.has(suiteAbs) || owningSuites.has(s.file)) {
       affected.push(s);
       continue;
     }

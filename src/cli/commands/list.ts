@@ -22,7 +22,7 @@ export async function listCommand(paths: string[]): Promise<number> {
   const files = await discoverTests(cwd, paths, { testDir: defaults.testDir });
 
   if (files.length === 0) {
-    console.log(chalk.yellow('No *.test.yaml files found.'));
+    console.log(chalk.yellow('No *.test.yaml, *.test.yml, or *.test.ts files found.'));
     return 0;
   }
 

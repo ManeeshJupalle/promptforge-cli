@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 
 // Walks the relative-import graph of a TypeScript entry file and returns every
@@ -85,24 +85,49 @@ function resolveRelativeImport(spec: string, fromFile: string): string | null {
   const baseDir = path.dirname(fromFile);
   const abs = path.resolve(baseDir, spec);
 
+  // Step 1: try the specifier as-is and with each source extension. Only
+  // accept regular files — a naked `existsSync(abs)` would be true for a
+  // directory (`./helpers`) and we'd incorrectly resolve to the directory
+  // itself, skipping the index-file fallback below.
   for (const ext of RESOLVE_EXTS) {
     const candidate = abs + ext;
-    if (existsSync(candidate)) return candidate;
+    if (isFile(candidate)) return candidate;
   }
 
+  // Step 2: TS-ESM users write `./helper.js` but ship `helper.ts`. Swap the
+  // JS extension for its TS equivalent and retry.
   const specExt = path.extname(abs);
   const tsSwaps = JS_TO_TS[specExt];
   if (tsSwaps) {
     const stem = abs.slice(0, -specExt.length);
     for (const swap of tsSwaps) {
       const candidate = stem + swap;
-      if (existsSync(candidate)) return candidate;
+      if (isFile(candidate)) return candidate;
     }
   }
 
-  for (const ext of INDEX_EXTS) {
-    const candidate = path.join(abs, 'index' + ext);
-    if (existsSync(candidate)) return candidate;
+  // Step 3: the specifier points at a directory — look for index.*.
+  if (isDirectory(abs)) {
+    for (const ext of INDEX_EXTS) {
+      const candidate = path.join(abs, 'index' + ext);
+      if (isFile(candidate)) return candidate;
+    }
   }
   return null;
+}
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isDirectory(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }
